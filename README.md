@@ -1,170 +1,109 @@
 # 🤖 Devy Agent (git-agent-cli)
 
-An autonomous CLI agent for Git, GitHub, and codebase work, built on Node.js and running entirely through **local Ollama** (no model name is ever hardcoded - the model comes from what you actually have installed).
+An autonomous, professional-grade CLI agent for Git, GitHub, and codebase engineering. Built on Node.js and designed for high-reliability local execution via **Ollama**, ensuring your code and data never leave your machine.
 
-## ✨ Features
+## ✨ Core Capabilities
 
-- **No fixed model**: the agent talks to the Ollama API, lists the models actually installed on your machine, and lets you pick - or uses whatever is set in `.env` / saved from a previous `/model` choice.
-- **111 tools**, grouped as:
-  - **Files** (5): read / write / precise edit (`edit_file`, old_str → new_str) / directory tree / content search. `write_file`/`edit_file` are the preferred way to create or change file content - a shell heredoc is only a fallback if they genuinely fail.
-  - **Project management** (7, new): `make_dir`, `move_path`, `copy_path`, `delete_path`, `find_files` (glob-style filename search), `read_many_files` (batch read), `file_info` (size/type/line-count without reading the whole file).
-  - **Diagnostics** (3, new): `detect_project` (identify the tech stack, manifest, npm scripts), `run_tests` (auto-detect and run the test suite, structured pass/fail), `check_tool_installed` (verify a binary is on PATH before relying on it).
-  - **Terminal** (1): `execute_command`, for anything with no dedicated tool (installs, dev servers, toolchains).
-  - **Git, local** (51): built from the official git documentation - `init`, `add`, `commit`, `branch`, `merge`, `rebase`, `stash`, `bisect`, `reflog`, `check-ignore`... down to a `git_raw` fallback for anything not covered.
-  - **GitHub, remote** (19): edit a repo **directly via token, no `clone` required** (read/write/delete files, an **atomic multi-file commit** in one call, branches, Pull Requests, Issues, code search) - plus `git_clone` if you'd rather work locally.
-  - **GitHub Actions** (16): list/trigger/cancel/re-run workflows, inspect runs and jobs, pull job logs, artifacts.
-  - **Planning** (4): `create_plan`, `update_task`, `add_task`, `get_plan` - persisted per project, with input validation that rejects malformed task data instead of silently corrupting the plan.
-  - **Project memory** (3): `memory_read`, `memory_append`, `memory_write` - durable notes that survive across sessions.
-  - **Project switching** (1, new): `set_project` - creates/switches into a dedicated subdirectory for a distinct project.
-  - **Reasoning** (1): `think`, a scratchpad for multi-step reasoning before acting.
-  - **Subagent Orchestration** (new): `spawn_subagents_parallel` allows the agent to break down a complex goal into multiple independent subtasks and execute them in parallel, collecting all results at once. It includes a built-in caching system to avoid redundant LLM calls for identical tasks.
-- **Every project gets its own space.** The agent's base directory is wherever you run it from. When you ask it to build something new and separate, it calls `set_project` to create a dedicated subdirectory - and that subproject gets its **own** `.devy-agent/` folder with its own plan, persistent memory, chat log, and tool-output cache. Switching between projects in the same workspace switches all of that automatically; nothing gets mixed together in one shared root.
-- **A chat log, not just a step trace.** Alongside the plan and memory, each project keeps a clean `.devy-agent/chat.md` record of what was asked and what was delivered - separate from the verbose step-by-step terminal output.
-- **Automatic context compression**: as the conversation nears the model's context window, the agent summarizes the oldest part of the history (using the same model) while keeping key decisions and facts, and truncates long tool outputs (caching the full version locally).
-- **Multi-step thinking + planning** via an explicit `THINK / ACTION / FINAL` protocol, with automatic recovery if the model returns a malformed action (asks it to retry instead of silently failing or looping forever).
-- **Stoppable.** Press `Ctrl+C` while the agent is working to cancel the current step and get control back; press it again at an idle prompt to quit.
-- **Paste-safe input.** Pasting a multi-line block into the prompt is submitted as one input, not split into one task per line.
-- **Clear, categorized output.** Every tool call is shown with an icon for its category (📖 read, 📝 write, ✏️ edit, 🔧 git, 🐙 GitHub, 🩺 diagnostics, 📋 plan, 🧠 memory, 🤔 thinking...) so it's obvious at a glance what the agent is actually doing.
-- **Slash commands** for direct control without going through the model - see below.
+### 🛠️ Massive Toolbelt (110+ Integrated Tools)
+The agent operates using a sophisticated tool registry, allowing it to interact with your system with precision:
+- **Filesystem Mastery**: Read, write, and precise block-editing (`edit_file`). Includes a directory tree visualizer and deep content search.
+- **Project Management**: `make_dir`, `move_path`, `copy_path`, `delete_path`, and advanced glob-style `find_files`.
+- **System Diagnostics**: `detect_project` (tech stack & manifest analysis), `run_tests` (auto-detects and executes test suites), and binary dependency verification.
+- **Local Git Automation**: Complete implementation of the Git spec (init, add, commit, branch, merge, rebase, stash, bisect, reflog, etc.).
+- **Remote GitHub API**: Edit repositories **directly via token without cloning**. Supports atomic multi-file commits, PR management, and Issue tracking.
+- **GitHub Actions**: Full control over CI/CD workflows—trigger, cancel, inspect jobs, and pull logs/artifacts.
+- **Terminal Access**: A secure `execute_command` sandbox for custom toolchains, installs, and dev-server management.
 
-## 📦 Installation (Termux)
+### 🧠 Advanced Intelligence Engine
+- **Subagent Orchestration**: Ability to spawn multiple independent subagents in parallel via `spawn_subagents_parallel`, breaking complex goals into atomic sub-tasks with a built-in result caching system.
+- **Contextual Memory**: Durable project-level memory (`memory.md`) that persists across sessions, combined with a **Vector Store** for semantic codebase search.
+- **Autonomous Planning**: Integrated `PlanManager` that creates and updates structured task lists, ensuring the agent stays on track for complex migrations or feature builds.
+- **Cognitive Scratchpad**: An explicit `think` tool for multi-step reasoning before taking action.
+- **Adaptive Context**: Automatic context compression and tool-output truncation to maintain performance as conversation history grows.
+
+### 🔌 Extensibility & Integration
+- **Skill System**: A pluggable architecture allowing the agent to load specialized skills (e.g., `code-review`, `debug-workflow`, `backend-architecture`) for expert-level task execution.
+- **MCP Support**: Integration with the **Model Context Protocol (MCP)**, enabling the agent to connect to external tool servers and expand its capabilities dynamically.
+- **Model Agnostic**: No hardcoded models. It detects installed Ollama models and allows session-based switching.
+
+## 📦 Installation (Termux / Linux / macOS)
 
 ```bash
-pkg install nodejs-lts git -y
+pkg install nodejs-lts git -y  # Termux
+# or use your system package manager for nodejs and git
 cd git-agent-cli
 npm install
 ```
 
-Make sure Ollama is running:
-
+Ensure Ollama is running:
 ```bash
 ollama serve &
-ollama pull qwen2.5-coder   # or any model you already have
+ollama pull qwen2.5-coder   # Recommended model
 ```
 
-### Option A: run it in place
+### Setup & Execution
 
+**Option A: Local Run**
 ```bash
 cp .env.example .env
 node bin/agent.js chat
 ```
 
-### Option B: install it globally as `devy-git` (recommended)
-
-This lets you run the agent from *any* project directory, not just this folder:
-
+**Option B: Global Installation (Recommended)**
 ```bash
 npm install -g .
-# or, for local development without publishing:
-npm link
-```
-
-Then put your settings in a **global** env file instead of a per-project `.env`:
-
-```bash
+# Setup global environment
 mkdir -p ~/.devy-agent
 cp .env.example ~/.devy-agent/.env
-# edit ~/.devy-agent/.env with your GITHUB_TOKEN etc.
 ```
+Now run from any directory: `devy-git chat`
 
-Now from anywhere:
-
-```bash
-cd ~/projects/my-repo
-devy-git chat
-```
-
-By default the agent operates on **whatever directory you run it from** (like `git` itself) - no need to set `WORKSPACE_DIR` unless you want to point it somewhere else. A project-local `.env` (if present in the current directory) always takes priority over the global one, so you can still override settings per-project.
-
-Fill in at least:
-
+**Environment Configuration (`.env`):**
 ```env
 OLLAMA_HOST=http://localhost:11434
-# leave OLLAMA_MODEL empty to pick interactively from what's actually installed
-
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx   # only needed for GitHub/Actions tools
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 GITHUB_DEFAULT_OWNER=username
-GITHUB_DEFAULT_REPO=repo-name           # just the name, NOT a full URL
+GITHUB_DEFAULT_REPO=repo-name
 ```
 
-## 🚀 Usage
+## 🚀 Usage Guide
 
-Interactive chat mode (best for anything non-trivial):
+### Interaction Modes
+- **Interactive Chat**: `devy-git chat` (Best for complex engineering tasks).
+- **Single Task**: `devy-git "refactor the auth logic in src/core and update tests"`
+- **Pinned Session**: `devy-git --model qwen2.5-coder:7b --workspace ~/my-project chat`
 
-```bash
-devy-git chat
-# or, if not installed globally:
-node bin/agent.js chat
-```
-
-Run a single task directly from the command line:
-
-```bash
-devy-git "check repo status, stage any modified files, and commit with a sensible message"
-```
-
-Pin a model/host/workspace for one run:
-
-```bash
-devy-git --model qwen2.5-coder:7b --workspace ~/projects/my-repo chat
-```
-
-While a task is running, press **Ctrl+C** to stop it and get the prompt back - the plan and memory saved so far aren't lost. Press Ctrl+C again at an idle prompt to quit.
-
-### Slash commands (inside chat mode)
-
-| Command | What it does |
+### Power User Commands (Inside Chat)
+| Command | Action |
 |---|---|
-| `/help` | List all commands |
-| `/models` | List models installed in Ollama |
-| `/model <name>` | Switch the active model for this session |
-| `/plan` | Show the current plan and task status |
-| `/task` | List tasks — see `/task` alone for full usage (`add`, `done`, `<id> <status>`) |
-| `/memory` | Show the active project's persistent memory (`.devy-agent/memory.md`) |
-| `/project` | Show which project directory is currently active |
-| `/clear` | Clear the active conversation (plan and memory are kept) |
-| `Ctrl+C` | Stop the agent mid-task; press again at an idle prompt to quit |
-| `exit` / `quit` | Leave the chat |
+| `/plan` | Visualize current task progress and strategy |
+| `/model <name>` | Swap the active LLM on the fly |
+| `/memory` | View/Edit the project's persistent knowledge base |
+| `/project` | Identify and switch the active project directory |
+| `/clear` | Reset conversation history without losing plan/memory |
+| `Ctrl+C` | Interrupt the agent mid-step to provide feedback |
 
-## 🔑 Required GitHub token scopes
+## 🗂️ Architecture Overview
 
-For every tool to work (file edits, branches, PRs, Actions):
-- Classic token: `repo` + `workflow`
-- Fine-grained token: Contents (Read/Write), Pull requests (Read/Write), Actions (Read/Write), Workflows (Read/Write)
-
-## 🗂️ Project layout
-
-```
-bin/agent.js                     entry point + slash commands + input handling
-src/config/                      Ollama model discovery, settings resolution, global/local env loading
-src/llm/ollama.js                Ollama client (chat + streaming + abort support)
-src/core/                        protocol parser, system prompt, context manager, main loop,
-                                  project store, project context, session (chat) log
-src/tools/                       every tool (files, project management, diagnostics, terminal,
-                                  git, GitHub, Actions, planning, memory, project switching, thinking)
-scripts/selfcheck.js             offline diagnostic covering every part of the project (see below)
-~/.devy-agent/.env                optional global settings (used when run as `devy-git` from any directory)
-~/.devy-agent/config.json         saved model/host preference
-<workspace>/.devy-agent/          base workspace's plan.json, memory.md, chat.md, cache (if working there directly)
-<workspace>/<project>/.devy-agent/  a subproject's own plan/memory/chat/cache, created by set_project
+```text
+bin/agent.js             ➔ Entry point & CLI Command Processor
+src/core/                ➔ Orchestrator, Subagent Manager, & Context Logic
+src/tools/               ➔ Tool Registry (Files, Git, GitHub, Planning, etc.)
+src/skills/              ➔ Specialized Domain Knowledge & Workflow Rules
+src/mcp/                 ➔ Model Context Protocol Client
+src/utils/               ➔ Vector Store, Logger, & Output Renderer
+skills/                  ➔ Pre-defined Skill Modules (Architecture, Review, etc.)
+<project>/.devy-agent/    ➔ Isolated State: plan.json, memory.md, chat.md
 ```
 
-By default `<workspace>` is just the current directory - the agent works wherever you run it from. For a brand-new, separate project it creates its own subdirectory (via `set_project`) instead of mixing files into an unrelated directory.
+## 🩺 Reliability & Safety
 
-## 🩺 Checking that everything works
+- **Self-Diagnostic Suite**: Run `node scripts/selfcheck.js` to verify the entire toolchain, parser, and persistence layers.
+- **Safe-Writes**: The agent prefers `edit_file` (precise replacement) over overwriting, preventing accidental data loss.
+- **Git Guard**: Force-pushes are executed using `--force-with-lease` to protect remote history.
+- **Sandbox Integrity**: `delete_path` is hard-coded to refuse deletion of project roots or the `.devy-agent` configuration folder.
 
-Run the self-check script any time - after installing, after pulling an update, or if something seems off:
-
-```bash
-node scripts/selfcheck.js
-```
-
-It's fully offline (no Ollama server or GitHub token required) and checks syntax, module loading, the GitHub owner/repo normalizer, the response protocol parser, plan/task persistence, project memory, all the new project-management/diagnostic tools, project switching, context compression, and the full tool registry - about 120 individual checks. If anything fails, it prints exactly which check and why; copy that output if you need to report an issue.
-
-## ⚠️ Safety notes
-
-- The agent executes real actions (commits, pushes, direct edits on GitHub, file deletion). Check the plan (`/plan`) before approving anything sensitive.
-- `git_push` uses `--force-with-lease` instead of a plain `--force` when a force push is requested, reducing the risk of clobbering someone else's work.
-- `delete_path` refuses to delete a project's root directory or its `.devy-agent` folder.
-- The token is only ever read from `.env` - never hardcode it or share it.
-- If an edited file doesn't show up in `git status`/`git diff`, the agent is instructed to check `git_check_ignore` and confirm the actual repo root before assuming something is broken - a common cause of "the edit succeeded but git sees nothing".
+## 🔑 GitHub Permissions
+Required scopes for full functionality:
+- **Classic**: `repo`, `workflow`
+- **Fine-grained**: Contents (RW), Pull Requests (RW), Actions (RW), Workflows (RW)
