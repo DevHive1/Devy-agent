@@ -1,0 +1,26 @@
+{
+  "name": "git-agent-cli",
+  "version": "1.0.0",
+  "description": "An autonomous CLI agent powered by local Ollama (no hardcoded model) for local Git management and direct GitHub edits via token - with planning, multi-step reasoning, and automatic context compression",
+  "main": "bin/agent.js",
+  "bin": {
+    "devy-git": "./bin/agent.js",
+    "gitagent": "./bin/agent.js"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/agent.js",
+    "chat": "node bin/agent.js chat",
+    "selfcheck": "node scripts/selfcheck.js"
+  },
+  "dependencies": {
+    "chalk": "4.1.2",
+    "boxen": "5.1.2",
+    "dotenv": "16.4.5"
+  },
+  "license": "MIT",
+  "author": "DevHive"
+}

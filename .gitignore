@@ -1,0 +1,7 @@
+node_modules/
+.env
+workspace/
+data/
+*.log
+.devy-agent/
+davhave-portfolio/
