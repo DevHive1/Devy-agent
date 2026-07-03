@@ -77,7 +77,11 @@ GITHUB_DEFAULT_REPO=repo-name
 | Command | Action |
 |---|---|
 | `/plan` | Visualize current task progress and strategy |
-| `/model <name>` | Swap the active LLM on the fly |
+| `/task` | **Task Manager**: List tasks, or use `/task add <title>`, `/task done <id>`, or `/task <id> <status>` |
+| `/model <name>` | Swap the active LLM on the fly (use `/models` to see available) |
+| `/approvals <mode>` | Set execution safety: `suggest` (prompt all), `auto-edit` (auto-approve writes), or `full-auto` |
+| `/skills` | List all registered modular task workflows (e.g., Code Review, Architecture) |
+| `/skill <name>` | Inspect the detailed technical specifications of a specific skill |
 | `/memory` | View/Edit the project's persistent knowledge base |
 | `/project` | Identify and switch the active project directory |
 | `/clear` | Reset conversation history without losing plan/memory |
