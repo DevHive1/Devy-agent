@@ -60,7 +60,7 @@ function toolCallResult(toolName, result, durationMs) {
   const color = success ? COLORS.success : COLORS.error;
   const duration = durationMs ? COLORS.muted(` (${durationMs}ms)`) : '';
   const preview = typeof result === 'string' ? result.slice(0, 120) :
-    result?.error ? result.error.slice(0, 120) :
+    result?.error ? String(result.message || result.error).slice(0, 120) :
     result?.success ? 'done' :
     JSON.stringify(result).slice(0, 120);
   return `  ${color(icon)} ${COLORS.dim(toolName)}${duration} ${COLORS.muted('→')} ${preview}`;

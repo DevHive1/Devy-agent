@@ -275,7 +275,8 @@ async function main() {
     cacheDir: devyPaths.cacheDir
   });
 
-  const { tools, planStore, memoryStore, chatLog, projectContext, skillRegistry } = buildToolRegistry(config, contextManager, devyPaths, llmClient);
+  const { tools, container } = buildToolRegistry(config, contextManager, devyPaths, llmClient);
+  const { planStore, memoryStore, chatLog, projectContext, skillRegistry } = container.getAll();
   
   // Connect and register MCP servers dynamically
   const mcpClients = await connectAndRegisterMCP(tools, projectContext.dir);

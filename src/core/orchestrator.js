@@ -3,23 +3,27 @@ const logger = require('../utils/logger');
 const { parseAgentResponse } = require('./parser');
 const eventBus = require('./eventBus');
 const output = require('../utils/outputRenderer');
+const { NetworkError, ProtocolError } = require('../utils/errors');
+const container = require('../utils/container');
 
 const MAX_CONSECUTIVE_PROTOCOL_ERRORS = 3;
 
 class Orchestrator {
-  constructor({ llmClient, tools, planStore, chatLog, projectContext, thinkLog, contextManager, systemPrompt, maxSteps, approvalPolicy, approvalManager }) {
+  constructor({ llmClient, tools, contextManager, systemPrompt, maxSteps, approvalPolicy, approvalManager }) {
     this.llmClient = llmClient;
     this.tools = tools;
-    this.planStore = planStore;
-    this.chatLog = chatLog;
-    this.projectContext = projectContext;
-    this.thinkLog = thinkLog;
     this.contextManager = contextManager;
     this.systemPrompt = systemPrompt;
     this.maxSteps = maxSteps;
     this.approvalPolicy = approvalPolicy || 'suggest';
     this.approvalManager = approvalManager;
     this.currentAbortController = null;
+
+    // Resolve core services from container
+    this.planStore = container.resolve('planStore');
+    this.chatLog = container.resolve('chatLog');
+    this.projectContext = container.resolve('projectContext');
+    this.thinkLog = container.resolve('thinkLog');
   }
 
   /** Stops the in-flight model call (if any). Used by the CLI's Ctrl+C handler. */
@@ -62,7 +66,12 @@ class Orchestrator {
           logger.stopped('Task stopped.');
           return null;
         }
-        logger.error('Model call failed: ' + e.message);
+        
+        const error = e.name === 'FetchError' || e.code === 'ENOTFOUND' 
+          ? new NetworkError(`LLM Connection failed: ${e.message}`) 
+          : new ProtocolError(`LLM Protocol failure: ${e.message}`);
+
+        logger.error(`[${error.name}] ${error.message}`);
         return null;
       }
       this.currentAbortController = null;

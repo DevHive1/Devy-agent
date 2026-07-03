@@ -12,6 +12,7 @@ function buildThinkTools(thinkLog) {
       params: { thought: 'string (required)' },
       handler: async ({ thought }) => {
         thinkLog.push({ at: Date.now(), thought });
+    if (thinkLog.length > 100) thinkLog.shift();
         return { recorded: true, total_thoughts: thinkLog.length };
       }
     }

@@ -78,7 +78,7 @@ async function gh(token, method, path, body, raw = false) {
       redirect: 'follow'
     });
   } catch (networkErr) {
-    return { error: true, status: 0, message: `Network error reaching GitHub API: ${networkErr.message}. Check your internet connection.` };
+    return { error: `Network error reaching GitHub API: ${networkErr.message}. Check your internet connection.`, status: 0 };
   }
   if (raw) {
     return { status: res.status, ok: res.ok, url: res.url };
@@ -88,7 +88,7 @@ async function gh(token, method, path, body, raw = false) {
   try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text.slice(0, 2000) }; }
   if (!res.ok) {
     const message = explainGithubError(res.status, data.message || res.statusText);
-    return { error: true, status: res.status, message };
+    return { error: message, status: res.status };
   }
   return data;
 }

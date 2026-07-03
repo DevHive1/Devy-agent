@@ -27,45 +27,58 @@ const os = require('os');
 const path = require('path');
 
 /**
- * Builds every tool available to the agent, plus the shared state (project context,
- * persistent plan/memory/chat log stores, think log) so the orchestrator can inject their
- * compact summaries into the prompt each step. Also ensures the base workspace's
- * ".devy-agent" data folder exists; set_project later re-points plan/memory/chat/cache at a
- * subproject's own .devy-agent folder without needing to rebuild any of this.
+ * Initializes the core state stores for the agent session.
  */
-function buildToolRegistry(config, contextManager, devyPaths, llmClient) {
+function createStateStore(config, devyPaths) {
   const projectContext = new ProjectContext(config.workspaceDir);
+  return {
+    projectContext,
+    planStore: new PlanStore(devyPaths.planPath),
+    memoryStore: new MemoryStore(devyPaths.memoryPath),
+    chatLog: new SessionLog(devyPaths.chatPath),
+    thinkLog: []
+  };
+}
 
-  const planStore = new PlanStore(devyPaths.planPath);
-  const memoryStore = new MemoryStore(devyPaths.memoryPath);
-  const chatLog = new SessionLog(devyPaths.chatPath);
-  const thinkLog = [];
-
-  // Initialize skills roots
+/**
+ * Initializes the skill discovery and management system.
+ */
+function createSkillSystem(projectContext, llmClient) {
   const globalSkillsDir = path.join(os.homedir(), '.devy-agent', 'skills');
   const projectSkillsDir = path.join(projectContext.dir, '.devy-agent', 'skills');
   const systemSkillsDir = path.resolve(__dirname, '../../skills');
+  
   const skillRegistry = new SkillRegistry([globalSkillsDir, projectSkillsDir, systemSkillsDir]);
   skillRegistry.discover();
 
-  // Skill installer for multi-source skill management
   const skillInstaller = new SkillInstaller({ skillsDir: projectSkillsDir });
+  const webTools = buildWebTools();
+  const skillSuggester = new SkillSuggester({ skillRegistry, skillInstaller, webTools, llmClient });
 
-  // Professional plan manager
-  const planManager = new PlanManager({ planDir: path.join(devyPaths.devyDir, 'plans') });
+  return { skillRegistry, skillInstaller, skillSuggester, webTools };
+}
 
-  // Vector store for semantic search
+/**
+ * Initializes the heavy infrastructure components.
+ */
+function createInfrastructure(devyPaths) {
   const vectorStore = new VectorStore({ persistPath: path.join(devyPaths.cacheDir, 'vectors.json') });
   vectorStore.load();
 
-  // Background task manager
   const backgroundTaskManager = new BackgroundTaskManager({ logDir: path.join(devyPaths.devyDir, 'tasks') });
 
-  // Web tools instance
-  const webTools = buildWebTools();
+  return { vectorStore, backgroundTaskManager };
+}
 
-  // Skill suggester
-  const skillSuggester = new SkillSuggester({ skillRegistry, skillInstaller, webTools, llmClient });
+/**
+ * Builds every tool available to the agent, coordinating the state, skill, and infra factories.
+ */
+function buildToolRegistry(config, contextManager, devyPaths, llmClient) {
+  const state = createStateStore(config, devyPaths);
+  const skills = createSkillSystem(state.projectContext, llmClient);
+  const infra = createInfrastructure(devyPaths);
+
+  const planManager = new PlanManager({ planDir: path.join(devyPaths.devyDir, 'plans') });
 
   let subagentTools = {};
   let subagentManager = null;
@@ -77,95 +90,71 @@ function buildToolRegistry(config, contextManager, devyPaths, llmClient) {
       githubDefaults: config.github,
       memoryPreview: ''
     });
-    subagentManager = new SubagentManager({
-      llmClient,
-      tools: {}, // will be assigned below
-      systemPrompt,
-      contextLength: config.ollama.contextLength,
-      compressionThreshold: config.compressionThreshold,
-      toolOutputMaxChars: config.toolOutputMaxChars,
-      cacheDir: devyPaths.cacheDir
-    });
+    subagentManager = new SubagentManager(llmClient, systemPrompt);
     subagentTools = buildSubagentTools(subagentManager);
   }
 
   const tools = {
-    ...buildFileTools(projectContext),
-    ...buildTerminalTools(projectContext),
-    ...buildGitTools(projectContext),
-    ...buildProjectManagementTools(projectContext),
+    ...buildFileTools(state.projectContext),
+    ...buildTerminalTools(state.projectContext),
+    ...buildGitTools(state.projectContext),
     ...buildGithubTools(config.github),
     ...buildGithubActionsTools(config.github),
-    ...buildPlanTools(planStore),
-    ...buildMemoryTools(memoryStore),
-    ...buildThinkTools(thinkLog),
-    ...buildProjectSwitchTools({ projectContext, planStore, memoryStore, chatLog, contextManager, skillRegistry }),
-    ...buildSkillTools(skillRegistry, skillExecutor, projectContext),
-    ...webTools,
-    ...buildAdvancedFileTools(projectContext),
-    ...buildSemanticSearchTools(projectContext, llmClient, vectorStore),
+    ...buildPlanTools(state.planStore),
+    ...buildMemoryTools(state.memoryStore),
+    ...buildThinkTools(state.thinkLog),
+    ...buildProjectManagementTools(state.projectContext),
+    ...buildProjectSwitchTools({
+      projectContext: state.projectContext,
+      planStore: state.planStore,
+      memoryStore: state.memoryStore,
+      chatLog: state.chatLog,
+      contextManager,
+      skillRegistry: skills.skillRegistry
+    }),
+    ...buildSkillTools(skills.skillRegistry, skills.skillExecutor, state.projectContext),
+    ...buildWebTools(),
+    ...buildAdvancedFileTools(state.projectContext),
+    ...buildSemanticSearchTools(state.projectContext, llmClient, infra.vectorStore),
+    ...buildBackgroundTools(infra.backgroundTaskManager),
     ...buildPlanManagerTools(planManager),
-    ...buildSkillInstallerTools(skillInstaller),
-    ...buildSkillSuggesterTools(skillSuggester),
-    ...buildBackgroundTools(backgroundTaskManager),
+    ...buildSkillInstallerTools(skills.skillInstaller),
+    ...buildSkillSuggesterTools(skills.skillSuggester),
     ...subagentTools
   };
 
-  if (subagentManager) {
-    const subagentToolsRegistry = { ...tools };
-    delete subagentToolsRegistry.spawn_subagent;
-    delete subagentToolsRegistry.wait_subagents;
-    subagentManager.tools = subagentToolsRegistry;
-  }
+  const container = require('../utils/container');
+  
+  container.register('planStore', state.planStore);
+  container.register('memoryStore', state.memoryStore);
+  container.register('chatLog', state.chatLog);
+  container.register('thinkLog', state.thinkLog);
+  container.register('projectContext', state.projectContext);
+  container.register('skillRegistry', skills.skillRegistry);
+  container.register('planManager', planManager);
+  container.register('skillInstaller', skills.skillInstaller);
+  container.register('vectorStore', infra.vectorStore);
+  container.register('backgroundTaskManager', infra.backgroundTaskManager);
+  container.register('skillSuggester', skills.skillSuggester);
 
-  return { tools, planStore, memoryStore, chatLog, thinkLog, projectContext, skillRegistry, planManager, skillInstaller, vectorStore, backgroundTaskManager, skillSuggester };
+  return {
+    tools,
+    container
+  };
 }
 
-const CATEGORIES = [
-  { label: 'Files (read/write/edit)', match: (n) => ['read_file', 'write_file', 'edit_file', 'list_dir', 'search_code'].includes(n) },
-  { label: 'Project management', match: (n) => ['make_dir', 'move_path', 'copy_path', 'delete_path', 'find_files', 'read_many_files', 'file_info'].includes(n) },
-  { label: 'Advanced files', match: (n) => ['multi_edit_file', 'replace_in_files', 'compare_files', 'tree_view', 'count_lines', 'lint_check'].includes(n) },
-  { label: 'Diagnostics', match: (n) => ['detect_project', 'run_tests', 'check_tool_installed'].includes(n) },
-  { label: 'Terminal', match: (n) => n === 'execute_command' },
-  { label: 'Git (local)', match: (n) => n.startsWith('git_') },
-  { label: 'GitHub Actions', match: (n) => n.startsWith('gh_actions_') },
-  { label: 'GitHub (remote, no clone needed)', match: (n) => n.startsWith('gh_') && !n.startsWith('gh_actions_') },
-  { label: 'Planning', match: (n) => ['create_plan', 'update_task', 'add_task', 'get_plan'].includes(n) },
-  { label: 'Advanced planning', match: (n) => ['create_advanced_plan', 'get_advanced_plan', 'list_plans', 'update_plan_task', 'add_plan_phase'].includes(n) },
-  { label: 'Project memory', match: (n) => n.startsWith('memory_') },
-  { label: 'Project switching', match: (n) => n === 'set_project' },
-  { label: 'Skills', match: (n) => ['list_skills', 'use_skill', 'create_skill', 'suggest_skills'].includes(n) },
-  { label: 'Skill management', match: (n) => ['install_skill', 'uninstall_skill', 'list_installed_skills', 'search_and_install_online_skill'].includes(n) },
-  { label: 'Background tasks', match: (n) => n.includes('_background_command') || n === 'list_background_commands' },
-  { label: 'Semantic search', match: (n) => ['semantic_search', 'index_project'].includes(n) },
-  { label: 'Subagents', match: (n) => ['spawn_subagent', 'wait_subagents'].includes(n) },
-  { label: 'Web', match: (n) => ['web_search', 'read_url'].includes(n) },
-  { label: 'Reasoning', match: (n) => n === 'think' }
-];
-
-/** Compact, categorized tool listing injected into the system prompt - name + one-line description each */
+/**
+ * Returns a compact description of all tools.
+ */
 function describeToolsCompact(tools) {
-  const entries = Object.entries(tools);
-  const used = new Set();
-  const lines = [];
-
-  for (const cat of CATEGORIES) {
-    const items = entries.filter(([name]) => cat.match(name) && !used.has(name));
-    if (!items.length) continue;
-    lines.push(`\n[${cat.label}]`);
-    items.forEach(([name, def]) => {
-      used.add(name);
-      lines.push(`- ${name}: ${def.description}`);
-    });
+  const descriptions = [];
+  for (const [name, tool] of Object.entries(tools)) {
+    descriptions.push(`${name}: ${tool.description || 'No description'}`);
   }
-
-  const rest = entries.filter(([name]) => !used.has(name));
-  if (rest.length) {
-    lines.push('\n[Other]');
-    rest.forEach(([name, def]) => lines.push(`- ${name}: ${def.description}`));
-  }
-
-  return lines.join('\n').trim();
+  return descriptions.join('\n');
 }
 
-module.exports = { buildToolRegistry, describeToolsCompact };
+module.exports = {
+  buildToolRegistry,
+  describeToolsCompact
+};

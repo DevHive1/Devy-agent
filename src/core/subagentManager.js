@@ -180,20 +180,17 @@ class SubagentManager {
 
 function buildSubagentTools(subagentManager) {
   return {
-    spawn_subagent: {
-      description: 'Spawn a subagent to perform a subtask or complete independent research in parallel. Returns the result once complete (or info if started in background).',
+    spawn_subagents_parallel: {
+      description: 'Spawn multiple subagents in parallel to perform independent tasks. Returns an array of results once all are complete.',
       params: {
-        task: 'string (required, the detailed prompt/goal for the subagent)',
-        context: 'string (optional, supporting details, files list, or specifications)',
-        mode: 'string (optional, "sync" to wait for result or "background" to run asynchronously, default "sync")',
-        bypassCache: 'boolean (optional, default false to reuse cached results)'
+        tasks: 'array (required) of { task: "string", context: "string (optional)", bypassCache: "boolean (optional)" }'
       },
-      handler: async ({ task, context, mode, bypassCache }) => {
+      handler: async ({ tasks }) => {
         try {
-          const res = await subagentManager.spawn({ task, context, mode, bypassCache });
-          return typeof res === 'string' ? { result: res } : res;
+          const results = await subagentManager.spawnParallel(tasks);
+          return { results };
         } catch (e) {
-          return { error: `Failed to spawn subagent: ${e.message}` };
+          return { error: `Failed to spawn parallel subagents: ${e.message}` };
         }
       }
     },

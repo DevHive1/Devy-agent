@@ -92,9 +92,9 @@ function buildGithubActionsTools(githubConfig) {
             headers: ghHeaders(token), redirect: 'follow'
           });
         } catch (networkErr) {
-          return { error: true, message: `Network error fetching job logs: ${networkErr.message}` };
+          return { error: `Network error fetching job logs: ${networkErr.message}` };
         }
-        if (!res.ok) return { error: true, status: res.status };
+        if (!res.ok) return { error: `GitHub API returned status ${res.status}`, status: res.status };
         const text = await res.text();
         // Trim long logs for context - the last 300 lines are usually what matters for diagnosing a failure
         const lines = text.split('\n');
