@@ -15,6 +15,7 @@ class VectorStore {
   constructor({ persistPath } = {}) {
     this.persistPath = persistPath || null;
     this.vectors = []; // {id, embedding, metadata}
+    this.fileHashes = {}; // file relative path -> { mtime, size }
   }
 
   add(id, embedding, metadata = {}) {
@@ -36,18 +37,25 @@ class VectorStore {
     this.vectors = this.vectors.filter(v => v.id !== id);
   }
 
-  clear() { this.vectors = []; }
+  clear() {
+    this.vectors = [];
+    this.fileHashes = {};
+  }
+
   size() { return this.vectors.length; }
 
   save() {
     if (!this.persistPath) return;
     try {
-      const data = this.vectors.map(v => ({
-        id: v.id,
-        embedding: Array.from(v.embedding),
-        metadata: v.metadata
-      }));
-      fs.writeFileSync(this.persistPath, JSON.stringify(data), 'utf8');
+      const data = {
+        vectors: this.vectors.map(v => ({
+          id: v.id,
+          embedding: Array.from(v.embedding),
+          metadata: v.metadata
+        })),
+        fileHashes: this.fileHashes
+      };
+      fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2), 'utf8');
     } catch (e) {
       console.error('VectorStore save failed:', e.message);
     }
@@ -57,8 +65,15 @@ class VectorStore {
     if (!this.persistPath) return;
     try {
       if (fs.existsSync(this.persistPath)) {
-        const data = JSON.parse(fs.readFileSync(this.persistPath, 'utf8'));
-        this.vectors = data;
+        const raw = JSON.parse(fs.readFileSync(this.persistPath, 'utf8'));
+        if (raw && raw.vectors) {
+          this.vectors = raw.vectors;
+          this.fileHashes = raw.fileHashes || {};
+        } else {
+          // Backward compatibility for old simple array format
+          this.vectors = Array.isArray(raw) ? raw : [];
+          this.fileHashes = {};
+        }
       }
     } catch (e) {
       console.error('VectorStore load failed:', e.message);

@@ -3,6 +3,69 @@ const fs = require('fs');
 const path = require('path');
 const { resolveWithin } = require('../core/projectContext');
 
+/** Helper to perform LCS-based line-by-line diffing between two arrays of lines */
+function diffLines(linesA, linesB) {
+  const M = linesA.length;
+  const N = linesB.length;
+  if (M * N > 250000) {
+    // Naive fallback for performance on very large files
+    const diffs = [];
+    const maxLen = Math.max(M, N);
+    for (let i = 0; i < maxLen; i++) {
+      if (linesA[i] !== linesB[i]) {
+        diffs.push({
+          type: 'change',
+          line_a: i + 1,
+          line_b: i + 1,
+          a: linesA[i] !== undefined ? linesA[i] : null,
+          b: linesB[i] !== undefined ? linesB[i] : null
+        });
+      }
+    }
+    return diffs;
+  }
+
+  const dp = Array.from({ length: M + 1 }, () => new Int32Array(N + 1));
+  for (let i = 1; i <= M; i++) {
+    for (let j = 1; j <= N; j++) {
+      if (linesA[i - 1] === linesB[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const diffs = [];
+  let i = M;
+  let j = N;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && linesA[i - 1] === linesB[j - 1]) {
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      diffs.push({
+        type: 'add',
+        line_a: null,
+        line_b: j,
+        a: null,
+        b: linesB[j - 1]
+      });
+      j--;
+    } else if (i > 0 && (j === 0 || dp[i - 1][j] > dp[i][j - 1])) {
+      diffs.push({
+        type: 'delete',
+        line_a: i,
+        line_b: null,
+        a: linesA[i - 1],
+        b: null
+      });
+      i--;
+    }
+  }
+  return diffs.reverse();
+}
+
 /**
  * Advanced local tools — enhanced file operations, batch edits, code analysis.
  */
@@ -106,13 +169,7 @@ function buildAdvancedFileTools(projectContext) {
           if (!fs.existsSync(fullB)) return { error: `File not found: ${file_b}` };
           const linesA = fs.readFileSync(fullA, 'utf8').split('\n');
           const linesB = fs.readFileSync(fullB, 'utf8').split('\n');
-          const diffs = [];
-          const maxLen = Math.max(linesA.length, linesB.length);
-          for (let i = 0; i < maxLen; i++) {
-            if (linesA[i] !== linesB[i]) {
-              diffs.push({ line: i + 1, a: linesA[i] !== undefined ? linesA[i] : null, b: linesB[i] !== undefined ? linesB[i] : null });
-            }
-          }
+          const diffs = diffLines(linesA, linesB);
           return { file_a, file_b, lines_a: linesA.length, lines_b: linesB.length, differences: diffs.length, diffs: diffs.slice(0, 100) };
         } catch (e) {
           return { error: `compare_files failed: ${e.message}` };
@@ -244,6 +301,86 @@ function buildAdvancedFileTools(projectContext) {
           return { valid: null, path: p, note: `No lint checker for ${ext} files. Use execute_command to run your linter.` };
         } catch (e) {
           return { error: `lint_check failed: ${e.message}` };
+        }
+      }
+    },
+
+    get_file_outline: {
+      description: 'Extract classes, functions, methods, and imports from a file without reading its full body. This is extremely token-efficient for understanding a file\'s structure and locating code before reading or editing.',
+      params: { path: 'string (required)' },
+      handler: async ({ path: p }) => {
+        try {
+          const full = resolveWithin(projectContext.dir, p);
+          if (!fs.existsSync(full)) return { error: `File not found: ${p}` };
+          if (fs.statSync(full).isDirectory()) return { error: `${p} is a directory, not a file.` };
+          
+          const content = fs.readFileSync(full, 'utf8');
+          const lines = content.split('\n');
+          const ext = path.extname(p);
+          const outline = [];
+          
+          const isPy = ext === '.py';
+          const isGo = ext === '.go';
+          const isRs = ext === '.rs';
+          const isJsTs = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'].includes(ext);
+          
+          lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            const lineNum = idx + 1;
+            
+            if (isJsTs) {
+              if (trimmed.startsWith('import ') || (trimmed.startsWith('const ') && trimmed.includes('require('))) {
+                outline.push({ line: lineNum, type: 'import', text: trimmed });
+              } else if (trimmed.startsWith('class ')) {
+                outline.push({ line: lineNum, type: 'class', text: trimmed.split('{')[0].trim() });
+              } else if (
+                trimmed.startsWith('function ') || 
+                trimmed.startsWith('async function ') ||
+                (trimmed.includes('=>') && (trimmed.startsWith('const ') || trimmed.startsWith('let ') || trimmed.startsWith('var '))) ||
+                /^(public |private |protected |async |get |set )?\w+\s*\(.*?\)\s*\{/.test(trimmed)
+              ) {
+                if (!/^(if|for|while|switch|catch)\b/.test(trimmed)) {
+                  outline.push({ line: lineNum, type: 'function/method', text: trimmed.split('{')[0].trim() });
+                }
+              }
+            } else if (isPy) {
+              if (trimmed.startsWith('import ') || trimmed.startsWith('from ')) {
+                outline.push({ line: lineNum, type: 'import', text: trimmed });
+              } else if (trimmed.startsWith('class ')) {
+                outline.push({ line: lineNum, type: 'class', text: trimmed.split(':')[0].trim() });
+              } else if (trimmed.startsWith('def ')) {
+                outline.push({ line: lineNum, type: 'function/method', text: trimmed.split(':')[0].trim() });
+              }
+            } else if (isGo) {
+              if (trimmed.startsWith('import ') || trimmed.startsWith('import (')) {
+                outline.push({ line: lineNum, type: 'import', text: trimmed });
+              } else if (trimmed.startsWith('type ') && trimmed.includes('struct')) {
+                outline.push({ line: lineNum, type: 'struct', text: trimmed.split('{')[0].trim() });
+              } else if (trimmed.startsWith('func ')) {
+                outline.push({ line: lineNum, type: 'function', text: trimmed.split('{')[0].trim() });
+              }
+            } else if (isRs) {
+              if (trimmed.startsWith('use ')) {
+                outline.push({ line: lineNum, type: 'import', text: trimmed });
+              } else if (trimmed.startsWith('struct ') || trimmed.startsWith('enum ') || trimmed.startsWith('trait ')) {
+                outline.push({ line: lineNum, type: 'struct/enum/trait', text: trimmed.split('{')[0].trim() });
+              } else if (trimmed.startsWith('fn ') || trimmed.startsWith('pub fn ')) {
+                outline.push({ line: lineNum, type: 'function', text: trimmed.split('{')[0].trim() });
+              } else if (trimmed.startsWith('impl ')) {
+                outline.push({ line: lineNum, type: 'implementation', text: trimmed.split('{')[0].trim() });
+              }
+            } else {
+              if (trimmed.startsWith('class ') || trimmed.startsWith('interface ')) {
+                outline.push({ line: lineNum, type: 'class/interface', text: trimmed });
+              } else if (trimmed.startsWith('def ') || trimmed.startsWith('function ') || trimmed.startsWith('func ') || trimmed.startsWith('fn ')) {
+                outline.push({ line: lineNum, type: 'function', text: trimmed });
+              }
+            }
+          });
+          
+          return { path: p, language: ext, totalLines: lines.length, outline };
+        } catch (e) {
+          return { error: `get_file_outline failed: ${e.message}` };
         }
       }
     }

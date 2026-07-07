@@ -17,9 +17,17 @@
     "selfcheck": "node scripts/selfcheck.js"
   },
   "dependencies": {
-    "chalk": "4.1.2",
+    "ansi-escapes": "^4.3.2",
     "boxen": "5.1.2",
-    "dotenv": "16.4.5"
+    "chalk": "4.1.2",
+    "cli-highlight": "^2.1.11",
+    "dotenv": "16.4.5",
+    "figures": "^3.2.0",
+    "marked": "^4.3.0",
+    "marked-terminal": "^6.2.0",
+    "ora": "^5.4.1",
+    "string-width": "^4.2.3",
+    "wrap-ansi": "^7.0.0"
   },
   "license": "MIT",
   "author": "DevHive"

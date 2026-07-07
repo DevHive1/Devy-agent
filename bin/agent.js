@@ -16,6 +16,11 @@ const { loadRules } = require('../src/skills/rulesLoader');
 const { connectAndRegisterMCP } = require('../src/mcp/mcpConfig');
 const { ApprovalManager } = require('../src/core/approvalManager');
 
+const { printOverhauledBanner } = require('../src/ui/banner');
+const { renderHelpPanel, renderModelsPanel, renderSkillsPanel } = require('../src/ui/commandRenderer');
+const { renderPlanSummary } = require('../src/ui/progressTracker');
+const { getPromptString } = require('../src/ui/promptInput');
+
 const SLASH_COMMANDS = [
   { cmd: '/help', desc: 'Show this list of commands' },
   { cmd: '/models', desc: 'List models installed in Ollama' },
@@ -27,6 +32,7 @@ const SLASH_COMMANDS = [
   { cmd: '/approvals [mode]', desc: 'Show or set the tool execution approval mode (suggest/auto-edit/full-auto)' },
   { cmd: '/skills', desc: 'List all available skills (modular task workflows)' },
   { cmd: '/skill <name>', desc: 'Show the detailed instructions for a specific skill' },
+  { cmd: '/gplan', desc: 'Show the current Graph Plan and dependency status' },
   { cmd: '/clear', desc: 'Clear the active conversation (plan and memory are kept)' },
   { cmd: 'Ctrl+C', desc: 'Stop the agent mid-task; press again at an idle prompt to quit' },
   { cmd: 'exit / quit', desc: 'Leave the chat' }
@@ -50,43 +56,15 @@ function parseCliArgs(argv) {
 }
 
 function printBanner(config) {
-  console.log(boxen(
-    chalk.bold.cyan('🤖 Devy Agent') + chalk.gray('  —  Git & GitHub CLI agent') + '\n' +
-    chalk.gray(`Model: ${config.ollama.model}  |  Ollama: ${config.ollama.host}`) + '\n' +
-    chalk.gray(`Workspace: ${config.workspaceDir}`) + '\n' +
-    chalk.gray(`GitHub: ${config.github.token ? 'connected ✅' : 'no token set (GitHub tools disabled) ⚠️'}`),
-    { padding: 1, borderColor: 'cyan', borderStyle: 'round' }
-  ));
-  if (!config.github.token) {
-    logger.info(`Tip: running as a global command? Put GITHUB_TOKEN and other settings in ${GLOBAL_ENV_FILE} to use them from any directory, instead of a .env per project.`);
-  }
-  console.log(chalk.gray(`Type a request, or a command (${chalk.bold('/help')} for the list):\n`));
+  printOverhauledBanner(config);
 }
 
 function printHelp() {
-  console.log(chalk.bold('\nCommands:'));
-  SLASH_COMMANDS.forEach((c) => console.log(`  ${chalk.cyanBright(c.cmd.padEnd(16))} ${chalk.gray(c.desc)}`));
-  console.log(chalk.gray('\n/task usage:'));
-  console.log(chalk.gray('  /task                        list all tasks in the current plan'));
-  console.log(chalk.gray('  /task add <title>            add a new task'));
-  console.log(chalk.gray('  /task done <id>              mark a task done'));
-  console.log(chalk.gray('  /task <id> <status> [note]   set a task\'s status (pending/in_progress/done/failed)'));
-  console.log();
+  console.log('\n' + renderHelpPanel(SLASH_COMMANDS));
 }
 
-const STATUS_ICON = { pending: '⏳', in_progress: '🔄', done: '✅', failed: '❌' };
-
 function printPlan(summary) {
-  if (!summary.goal) {
-    console.log(chalk.gray('\nNo active plan yet. It will appear once the agent calls create_plan.\n'));
-    return;
-  }
-  console.log(chalk.bold(`\nGoal: `) + summary.goal + chalk.gray(`  (${summary.progress} done)`));
-  summary.tasks.forEach((t) => {
-    const icon = STATUS_ICON[t.status] || '•';
-    console.log(`  ${icon} #${t.id} ${t.title}${t.note ? chalk.gray('  — ' + t.note) : ''}`);
-  });
-  console.log();
+  console.log('\n' + renderPlanSummary(summary));
 }
 
 function handleTaskCommand(rest, planStore) {
@@ -134,9 +112,7 @@ async function handleSlashCommand(text, ctx) {
         logger.error(e.message);
         return;
       }
-      console.log(chalk.bold('\nModels available in Ollama:'));
-      models.forEach((m) => console.log(`  ${m === ctx.config.ollama.model ? chalk.green('●') : ' '} ${m}`));
-      console.log();
+      console.log('\n' + renderModelsPanel(models, ctx.config.ollama.model));
       return;
     }
 
@@ -181,6 +157,10 @@ async function handleSlashCommand(text, ctx) {
       return;
     }
 
+    case 'gplan':
+      console.log('\n' + ctx.graphPlanManager.renderSummary() + '\n');
+      return;
+
     case 'clear':
       ctx.contextManager.reset();
       logger.info('Conversation cleared. Plan and project memory were kept.');
@@ -188,15 +168,7 @@ async function handleSlashCommand(text, ctx) {
 
     case 'skills': {
       const skills = ctx.skillRegistry.getAll();
-      if (skills.length === 0) {
-        console.log(chalk.gray('\nNo skills registered. Add skills to ~/.devy-agent/skills/ or .devy-agent/skills/\n'));
-      } else {
-        console.log(chalk.bold('\nAvailable Skills:'));
-        skills.forEach(s => {
-          console.log(`  ${chalk.cyan(s.name.padEnd(20))} ${chalk.gray(s.description)}`);
-        });
-        console.log();
-      }
+      console.log('\n' + renderSkillsPanel(skills));
       return;
     }
 
@@ -276,7 +248,7 @@ async function main() {
   });
 
   const { tools, container } = buildToolRegistry(config, contextManager, devyPaths, llmClient);
-  const { planStore, memoryStore, chatLog, projectContext, skillRegistry } = container.getAll();
+  const { planStore, memoryStore, chatLog, projectContext, skillRegistry, graphPlanManager } = container.getAll();
   
   // Connect and register MCP servers dynamically
   const mcpClients = await connectAndRegisterMCP(tools, projectContext.dir);
@@ -299,17 +271,22 @@ async function main() {
     githubDefaults: config.github,
     memoryPreview: memoryStore.preview(),
     rules,
-    skillIndex
+    skillIndex,
+    modelName: llmClient.modelName || llmClient.model
   });
 
   const approvalManager = new ApprovalManager({ mode: 'full-auto' });
 
   const orchestrator = new Orchestrator({
-    llmClient, tools, planStore, chatLog, projectContext, thinkLog: [], contextManager, systemPrompt,
-    maxSteps: config.maxAgentSteps, approvalManager
+    llmClient,
+    tools,
+    contextManager,
+    systemPrompt,
+    maxSteps: config.maxAgentSteps,
+    approvalManager
   });
 
-  const ctx = { config, llmClient, planStore, memoryStore, projectContext, contextManager, orchestrator, skillRegistry, approvalManager };
+  const ctx = { config, llmClient, planStore, memoryStore, projectContext, contextManager, orchestrator, skillRegistry, approvalManager, graphPlanManager };
 
   printBanner(config);
   logger.info(`Project data folder: ${path.relative(process.cwd(), devyPaths.devyDir) || DEVY_DIR_NAME} (plan, memory, chat log, tool-output cache)`);
@@ -325,7 +302,9 @@ async function main() {
     return;
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: chalk.bold('> ') });
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  approvalManager.rl = rl;
+  rl.setPrompt(getPromptString(projectContext, approvalManager));
   rl.prompt();
 
   let taskRunning = false;
@@ -341,7 +320,7 @@ async function main() {
   });
 
   createPasteSafeInput(rl, async (text) => {
-    if (!text) { rl.prompt(); return; }
+    if (!text) { rl.setPrompt(getPromptString(projectContext, approvalManager)); rl.prompt(); return; }
     if (['exit', 'quit'].includes(text.toLowerCase())) {
       await cleanup();
       rl.close();
@@ -359,6 +338,7 @@ async function main() {
       logger.error('Unexpected error: ' + e.message);
     }
     taskRunning = false;
+    rl.setPrompt(getPromptString(projectContext, approvalManager));
     rl.prompt();
   });
 

@@ -29,8 +29,10 @@ class ProjectContext {
 
 /** Resolves a path relative to the given root, rejecting anything that escapes it. */
 function resolveWithin(rootDir, p) {
-  const resolved = path.resolve(rootDir, p || '.');
-  if (!resolved.startsWith(path.resolve(rootDir))) {
+  const resolvedRoot = path.resolve(rootDir);
+  const resolved = path.resolve(resolvedRoot, p || '.');
+  const relative = path.relative(resolvedRoot, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Not allowed: path is outside the active project directory');
   }
   return resolved;

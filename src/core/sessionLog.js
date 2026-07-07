@@ -30,6 +30,35 @@ class SessionLog {
     } catch (_) { /* non-fatal */ }
   }
 
+  appendTurn({ userInput, toolsExecuted, response }) {
+    const ts = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    
+    let toolsSection = '';
+    if (toolsExecuted && toolsExecuted.length > 0) {
+      toolsSection = `\n\n#### 🛠️ Tools Executed:\n` + toolsExecuted.map(t => {
+        const cleanParams = t.params ? JSON.stringify(t.params) : '{}';
+        const displayParams = cleanParams.length > 300 ? cleanParams.slice(0, 300) + '...' : cleanParams;
+        return `- \`${t.tool}\` (${displayParams})`;
+      }).join('\n');
+    }
+
+    const entry = `
+---
+
+## 💬 Turn — ${ts}
+
+### 👤 User Prompt
+> ${userInput.trim().replace(/\n/g, '\n> ')}
+${toolsSection}
+
+### 🤖 Devy Agent Response
+${response.trim()}
+`;
+    try {
+      fs.appendFileSync(this.filePath, entry, 'utf8');
+    } catch (_) { /* non-fatal */ }
+  }
+
   /** Re-point this log at a new project's chat file (used when set_project switches directories). */
   switchTo(filePath) {
     this.filePath = filePath;

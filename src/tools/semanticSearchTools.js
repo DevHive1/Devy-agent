@@ -28,7 +28,7 @@ function buildSemanticSearchTools(projectContext, llmClient, vectorStore) {
           const root = path.resolve(projectContext.dir, p || '.');
           const exts = extensions.split(',').map(e => '.' + e.trim());
           const ignore = new Set(['node_modules', '.git', '.devy-agent', 'dist', 'build', '__pycache__']);
-          let fileCount = 0, chunkCount = 0;
+          let fileCount = 0, chunkCount = 0, skippedCount = 0;
           function walk(dir) {
             const files = [];
             try {
@@ -43,9 +43,24 @@ function buildSemanticSearchTools(projectContext, llmClient, vectorStore) {
             return files;
           }
           const files = walk(root);
-          vectorStore.clear();
+          const activeFileKeys = new Set();
+          
           for (const file of files) {
             try {
+              const fileKey = path.relative(root, file);
+              activeFileKeys.add(fileKey);
+              const stats = fs.statSync(file);
+              const cached = vectorStore.fileHashes[fileKey];
+              
+              if (cached && cached.mtime === stats.mtimeMs && cached.size === stats.size) {
+                skippedCount++;
+                fileCount++;
+                continue;
+              }
+
+              // File modified: remove existing vectors for this file
+              vectorStore.vectors = vectorStore.vectors.filter(v => v.metadata.file !== fileKey);
+
               const content = fs.readFileSync(file, 'utf8');
               const lines = content.split('\n');
               const chunkSize = 30, overlap = 5;
@@ -54,15 +69,26 @@ function buildSemanticSearchTools(projectContext, llmClient, vectorStore) {
                 if (chunk.trim().length < 20) continue;
                 const embedding = await llmClient.embed(chunk);
                 if (!embedding) return { error: 'Embedding not supported by current model.' };
-                const id = `${path.relative(root, file)}:${i}`;
-                vectorStore.add(id, embedding, { file: path.relative(root, file), startLine: i + 1, endLine: Math.min(i + chunkSize, lines.length), text: chunk.slice(0, 200) });
+                const id = `${fileKey}:${i}`;
+                vectorStore.add(id, embedding, { file: fileKey, startLine: i + 1, endLine: Math.min(i + chunkSize, lines.length), text: chunk.slice(0, 200) });
                 chunkCount++;
               }
+              
+              vectorStore.fileHashes[fileKey] = { mtime: stats.mtimeMs, size: stats.size };
               fileCount++;
             } catch (_) {}
           }
+
+          // Clean up deleted files from store
+          vectorStore.vectors = vectorStore.vectors.filter(v => activeFileKeys.has(v.metadata.file));
+          for (const key of Object.keys(vectorStore.fileHashes)) {
+            if (!activeFileKeys.has(key)) {
+              delete vectorStore.fileHashes[key];
+            }
+          }
+
           vectorStore.save();
-          return { indexed_files: fileCount, chunks: chunkCount };
+          return { indexed_files: fileCount, chunks_added: chunkCount, skipped_unchanged: skippedCount };
         } catch (e) {
           return { error: `Indexing failed: ${e.message}` };
         }

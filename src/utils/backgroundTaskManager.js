@@ -11,8 +11,12 @@ class BackgroundTaskManager {
     this.tasks = new Map(); // id -> { process, command, stdout, stderr, status, exitCode, startTime, endTime }
   }
 
-  startTask(command, args = [], cwd = process.cwd()) {
-    const taskId = 'bg-' + Math.random().toString(36).substring(2, 10);
+  async startTask(command, args = [], cwd = process.cwd(), name) {
+    const cleanName = name 
+      ? name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-') 
+      : command.split(' ')[0].replace(/[^a-z0-9_-]/gi, '').toLowerCase();
+    const suffix = Math.random().toString(36).substring(2, 6);
+    const taskId = `bg-${cleanName}-${suffix}`;
     const logPath = `${this.logDir}/${taskId}.log`;
     const logStream = fs.createWriteStream(logPath, { flags: 'a' });
 
@@ -51,7 +55,9 @@ class BackgroundTaskManager {
     });
 
     child.on('close', (code) => {
-      taskInfo.status = 'completed';
+      if (taskInfo.status !== 'killed') {
+        taskInfo.status = 'completed';
+      }
       taskInfo.exitCode = code;
       taskInfo.endTime = new Date().toISOString();
       logStream.end();
@@ -65,7 +71,28 @@ class BackgroundTaskManager {
       logStream.end();
     });
 
-    return { taskId, command: taskInfo.command, status: taskInfo.status };
+    // Wait 1000ms to detect early startup crashes
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    if (taskInfo.status === 'completed' || taskInfo.status === 'failed') {
+      return {
+        taskId,
+        command: taskInfo.command,
+        status: taskInfo.status,
+        exitCode: taskInfo.exitCode,
+        error: `Process exited early with code ${taskInfo.exitCode}.`,
+        stdout: taskInfo.stdoutTail,
+        stderr: taskInfo.stderrTail
+      };
+    }
+
+    return {
+      taskId,
+      command: taskInfo.command,
+      status: taskInfo.status,
+      stdout: taskInfo.stdoutTail,
+      stderr: taskInfo.stderrTail
+    };
   }
 
   sendInput(taskId, input) {

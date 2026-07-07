@@ -6,12 +6,13 @@ function buildBackgroundTools(taskManager) {
       description: 'Start a command running in the background. Returns immediately with a task ID. Use this for servers, compilation, tests, or commands that run forever or take a long time.',
       params: {
         command: 'string (required, the terminal command)',
-        args: 'array of strings (optional, arguments for command)'
+        args: 'array of strings (optional, arguments for command)',
+        name: 'string (optional, a descriptive label/name for the task, e.g. "dev-server" or "tests")'
       },
-      handler: async ({ command, args }) => {
+      handler: async ({ command, args, name }) => {
         if (!command) return { error: 'Missing required parameter: "command"' };
         try {
-          return taskManager.startTask(command, args || []);
+          return await taskManager.startTask(command, args || [], process.cwd(), name);
         } catch (e) {
           return { error: `Failed to start background task: ${e.message}` };
         }

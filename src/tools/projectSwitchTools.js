@@ -41,6 +41,38 @@ function buildProjectSwitchTools({ projectContext, planStore, memoryStore, chatL
 
         return { success: true, project: safeName, active_directory: newRoot };
       }
+    },
+
+    pin_file: {
+      description: 'Pin a file\'s full content to the agent\'s persistent workspace context. Pinned files are included directly in the system prompt so the agent always sees their exact code across steps and never forgets them during context compression. Keep at most 3-4 active files pinned to save context.',
+      params: { path: 'string (required)' },
+      handler: async ({ path: p }) => {
+        try {
+          const { resolveWithin } = require('../core/projectContext');
+          const full = resolveWithin(projectContext.dir, p);
+          if (!fs.existsSync(full)) return { error: `File not found: ${p}` };
+          if (fs.statSync(full).isDirectory()) return { error: `${p} is a directory, not a file.` };
+          
+          const content = fs.readFileSync(full, 'utf8');
+          contextManager.pinFile(p, content);
+          return { success: true, message: `Pinned ${p} to workspace context. Current pinned files: ${[...contextManager.pinnedFiles.keys()].join(', ')}` };
+        } catch (e) {
+          return { error: `Could not pin file ${p}: ${e.message}` };
+        }
+      }
+    },
+    
+    unpin_file: {
+      description: 'Unpin a file from the agent\'s persistent workspace context, removing it from the system prompt once you are done editing or reading it.',
+      params: { path: 'string (required)' },
+      handler: async ({ path: p }) => {
+        try {
+          contextManager.unpinFile(p);
+          return { success: true, message: `Unpinned ${p} from workspace context.` };
+        } catch (e) {
+          return { error: `Could not unpin file ${p}: ${e.message}` };
+        }
+      }
     }
   };
 }

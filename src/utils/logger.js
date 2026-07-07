@@ -22,6 +22,9 @@ const ICON_RULES = [
   { match: (n) => n === 'think', icon: '🤔' }
 ];
 
+const { renderThought, renderInfo, renderWarning, renderError, renderFinal } = require('../ui/notificationToast');
+const { renderStepIndicator } = require('../ui/progressTracker');
+
 function iconFor(tool) {
   const rule = ICON_RULES.find((r) => r.match(tool));
   return rule ? rule.icon : '⚙️ ';
@@ -33,34 +36,37 @@ function iconFor(tool) {
  */
 const logger = {
   thought(text) {
-    console.log(chalk.gray('🤔 Thought: ') + chalk.gray(text));
+    console.log(renderThought(text));
   },
   action(tool, params) {
+    // Keep action logged minimally in case other tools look for stdout,
+    // or let it print nicely.
     const paramsStr = JSON.stringify(params);
     const short = paramsStr.length > 200 ? paramsStr.slice(0, 200) + '…' : paramsStr;
-    console.log(chalk.cyan(`${iconFor(tool)} `) + chalk.cyanBright(tool) + chalk.gray(' ' + short));
+    console.log(chalk.cyan(`\n${iconFor(tool)} `) + chalk.cyanBright(tool) + chalk.gray(' ' + short));
   },
   observation(text) {
+    // Truncate observation preview for the CLI
     const short = text.length > 500 ? text.slice(0, 500) + '\n…(truncated for display only, full text was kept)' : text;
     console.log(chalk.dim('📋 Result: ') + chalk.dim(short));
   },
   final(text) {
-    console.log(chalk.green('\n✅ ' + text + '\n'));
+    console.log('\n' + renderFinal(text));
   },
   info(text) {
-    console.log(chalk.blue('ℹ️  ' + text));
+    console.log(renderInfo(text));
   },
   warn(text) {
-    console.log(chalk.yellow('⚠️  ' + text));
+    console.log(renderWarning(text));
   },
   error(text) {
-    console.log(chalk.red('❌ ' + text));
+    console.log(renderError(text));
   },
   stopped(text) {
     console.log(chalk.yellow('\n⏹  ' + text + '\n'));
   },
   step(n, max) {
-    console.log(chalk.magenta(`\n— step ${n}/${max} —`));
+    console.log(renderStepIndicator(n, max));
   },
   compress(beforeTokens, afterTokens) {
     console.log(chalk.gray(`🗜️  Context compressed: ~${beforeTokens} → ~${afterTokens} tokens`));
@@ -68,3 +74,4 @@ const logger = {
 };
 
 module.exports = logger;
+

@@ -2,7 +2,22 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_MEMORY = '# Project Memory\n\nDurable notes Devy Agent should remember about this project across sessions\n(conventions, decisions, gotchas, environment quirks). Edited via memory_append/memory_write,\nor by hand - this is a plain markdown file.\n';
+const DEFAULT_MEMORY = `# Project Memory
+
+This file is automatically maintained by Devy Agent to persist knowledge across sessions.
+
+## 📋 Task Log
+*(No tasks completed yet)*
+
+## 🛠️ Project Architecture & Tech Stack
+*(To be populated as codebase is explored)*
+
+## 📖 Development Conventions & Decisions
+*(To be populated as code style/conventions are established)*
+
+## ⚠️ Environment Quirks & Gotchas
+*(To be populated with Termux, port-binding, or platform quirks)*
+`;
 
 /**
  * Persistent, per-project memory file at <workspace>/.devy-agent/memory.md.

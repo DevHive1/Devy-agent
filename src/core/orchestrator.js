@@ -5,6 +5,8 @@ const eventBus = require('./eventBus');
 const output = require('../utils/outputRenderer');
 const { NetworkError, ProtocolError } = require('../utils/errors');
 const container = require('../utils/container');
+const StreamRenderer = require('../ui/streamRenderer');
+const Spinner = require('../ui/spinner');
 
 const MAX_CONSECUTIVE_PROTOCOL_ERRORS = 3;
 
@@ -24,6 +26,8 @@ class Orchestrator {
     this.chatLog = container.resolve('chatLog');
     this.projectContext = container.resolve('projectContext');
     this.thinkLog = container.resolve('thinkLog');
+    this.memoryStore = container.resolve('memoryStore');
+    this.planManager = container.resolve('planManager');
   }
 
   /** Stops the in-flight model call (if any). Used by the CLI's Ctrl+C handler. */
@@ -33,7 +37,25 @@ class Orchestrator {
 
   async runTask(userInput) {
     this.contextManager.addMessage('user', userInput);
-    if (this.chatLog) this.chatLog.append('User', userInput);
+    const toolsExecuted = [];
+
+    // Auto-suggest skills based on the task
+    try {
+      const skillSuggester = container.resolve('skillSuggester');
+      if (skillSuggester) {
+        const suggestions = await skillSuggester.suggestSkills(userInput);
+        if (suggestions && suggestions.length > 0) {
+          const strongMatches = suggestions.filter(s => s.score >= 2);
+          if (strongMatches.length > 0) {
+            const listStr = strongMatches.map(s => `- ${s.name}: ${s.description}`).join('\n');
+            const notice = `[System Notice] The following installed skills match your task. You must call use_skill with the skill name to read their instructions before proceeding:\n${listStr}`;
+            this.contextManager.addMessage('user', notice);
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Failed to auto-suggest skills: ${e.message}`);
+    }
 
     let consecutiveProtocolErrors = 0;
 
@@ -45,22 +67,54 @@ class Orchestrator {
       }
 
       const planLine = this.planStore.compactStatusLine();
+      const advPlanLine = this.planManager?.compactStatusLine();
       let sysPrompt = this.systemPrompt;
       if (this.projectContext && this.projectContext.projectName) {
         sysPrompt += `\n\n[Active project] ${this.projectContext.projectName} (${this.projectContext.dir})`;
       }
-      if (planLine) sysPrompt += `\n\n[Current plan status] ${planLine}`;
+      if (planLine) sysPrompt += `\n\n[Current task list status] ${planLine}`;
+      if (advPlanLine) sysPrompt += `\n\n[Current advanced plan status] ${advPlanLine}`;
       const messages = this.contextManager.buildPromptMessages(sysPrompt);
 
       logger.step(step, this.maxSteps);
-      logger.info(output.stepIndicator(step, this.maxSteps));
       let raw;
       this.currentAbortController = new AbortController();
       eventBus.emit('llm:start', { messages });
+      
+      const spinner = new Spinner('Generating response...');
+      spinner.start();
+      
+      const streamRenderer = new StreamRenderer();
+      let hasTokens = false;
+
       try {
-        raw = await this.llmClient.chat(messages, { temperature: 0.2, signal: this.currentAbortController.signal });
+        raw = await this.llmClient.chat(messages, {
+          temperature: 0.2,
+          stream: true,
+          onToken: (token) => {
+            if (!hasTokens) {
+              hasTokens = true;
+              spinner.stop();
+              streamRenderer.start();
+            }
+            streamRenderer.writeToken(token);
+          },
+          signal: this.currentAbortController.signal
+        });
+        
+        if (hasTokens) {
+          streamRenderer.finish();
+        } else {
+          spinner.stop();
+        }
+        
         eventBus.emit('llm:end', { raw });
       } catch (e) {
+        if (hasTokens) {
+          streamRenderer.finish();
+        } else {
+          spinner.stop();
+        }
         this.currentAbortController = null;
         if (e.aborted) {
           logger.stopped('Task stopped.');
@@ -98,15 +152,23 @@ class Orchestrator {
 
       if (parsed.type === 'final') {
         logger.final(parsed.text);
-        if (this.chatLog) this.chatLog.append('Devy Agent', parsed.text);
+        if (this.chatLog) {
+          this.chatLog.appendTurn({
+            userInput,
+            toolsExecuted,
+            response: parsed.text
+          });
+        }
         eventBus.emit('agent:final', { text: parsed.text });
+        await this._autoLogMemory(userInput);
         return parsed.text;
       }
 
       if (parsed.type === 'action') {
         const { tool, params } = parsed;
+        toolsExecuted.push({ tool, params });
         logger.action(tool, params);
-        logger.info(output.toolCallStart(tool, params));
+        console.log(output.toolCallStart(tool, params));
 
         let result;
         if (!this.tools[tool]) {
@@ -140,7 +202,7 @@ class Orchestrator {
             }
             const toolDuration = Date.now() - toolStart;
             eventBus.emit('tool:after', { tool, params, result });
-            logger.info(output.toolCallResult(tool, result, toolDuration));
+            console.log(output.toolCallResult(tool, result, toolDuration));
           }
         }
 
@@ -153,13 +215,72 @@ class Orchestrator {
 
       // Empty or otherwise unrecognized response - treat as final so the loop doesn't spin forever.
       logger.final(raw);
-      if (this.chatLog) this.chatLog.append('Devy Agent', raw);
+      if (this.chatLog) {
+        this.chatLog.appendTurn({
+          userInput,
+          toolsExecuted,
+          response: raw
+        });
+      }
       eventBus.emit('agent:final', { text: raw });
+      await this._autoLogMemory(userInput);
       return raw;
     }
 
     logger.warn(`Reached the maximum number of steps (${this.maxSteps}) without finishing. Use /plan and /task to check progress, then continue with a follow-up message.`);
+    if (this.chatLog) {
+      this.chatLog.appendTurn({
+        userInput,
+        toolsExecuted,
+        response: `[Agent reached step limit ${this.maxSteps} without finalizing]`
+      });
+    }
+    await this._autoLogMemory(userInput);
     return null;
+  }
+
+  async _autoLogMemory(userInput) {
+    if (!this.memoryStore || !this.llmClient) return;
+    try {
+      const messages = this.contextManager.messages;
+      if (messages.length === 0) return;
+
+      const currentMemory = this.memoryStore.read();
+      
+      const summarizePrompt = [
+        {
+          role: 'system',
+          content: `You are an expert technical archivist. Analyze the following chat log of a development session and integrate any new findings, changes, or conventions into the existing Project Memory Markdown.
+          
+Maintain a professional, structured, and detailed documentation. Add entries to the Task Log, update the Tech Stack, document any established Conventions/Decisions, and record any Gotchas/Environment quirks.
+
+Ensure you do not lose any existing information that remains valid, but refine, clean up, and reorganize if needed.
+Existing Memory:
+${currentMemory}
+
+Output the updated Project Memory markdown ONLY. Do not write any other explanation or markdown code block wrapper.`
+        },
+        {
+          role: 'user',
+          content: messages.map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content.slice(0, 1500) : JSON.stringify(m.content).slice(0, 1500)}`).join('\n').slice(-15000)
+        }
+      ];
+
+      const updatedMemory = await this.llmClient.chat(summarizePrompt, { temperature: 0.1 });
+      if (updatedMemory && updatedMemory.trim().startsWith('# Project Memory')) {
+        this.memoryStore.overwrite(updatedMemory.trim());
+      } else {
+        const planLine = this.planStore?.compactStatusLine() || (this.planManager ? this.planManager.compactStatusLine() : '');
+        const note = `Completed session task: "${userInput.slice(0, 100)}${userInput.length > 100 ? '...' : ''}". ${planLine ? `Status: ${planLine}` : ''}`;
+        this.memoryStore.append(note);
+      }
+    } catch (_) {
+      try {
+        const planLine = this.planStore?.compactStatusLine() || (this.planManager ? this.planManager.compactStatusLine() : '');
+        const note = `Completed session task: "${userInput.slice(0, 100)}${userInput.length > 100 ? '...' : ''}". ${planLine ? `Status: ${planLine}` : ''}`;
+        this.memoryStore.append(note);
+      } catch (__) {}
+    }
   }
 }
 

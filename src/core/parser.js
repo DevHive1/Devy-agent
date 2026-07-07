@@ -134,6 +134,11 @@ function parseAgentResponse(raw) {
   const thinkMatches = [...raw.matchAll(/THINK:\s*([\s\S]*?)(?=\n(?:THINK:|ACTION:|FINAL:)|$)/gi)];
   thinkMatches.forEach((m) => thoughts.push(m[1].trim()));
 
+  if (thoughts.length === 0) {
+    const thinkTags = [...raw.matchAll(/<think>([\s\S]*?)<\/think>/gi)];
+    thinkTags.forEach((m) => thoughts.push(m[1].trim()));
+  }
+
   const actionMatch = raw.match(/ACTION:\s*([\s\S]*?)(?=\nFINAL:|$)/i);
   if (actionMatch) {
     const json = extractJson(actionMatch[1]);
