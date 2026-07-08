@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const chalk = require('chalk');
 
 class PlanManager {
   constructor({ planDir }) {
@@ -110,6 +111,53 @@ class PlanManager {
     const total = plan.phases.reduce((s, p) => s + p.tasks.length, 0);
     const done = plan.phases.reduce((s, p) => s + p.tasks.filter(t => t.status === 'done').length, 0);
     return `[Plan: ${plan.title}] ${done}/${total} tasks done`;
+  }
+
+  renderPlansList() {
+    const plans = this.listPlans();
+    if (plans.length === 0) return 'No advanced plans found.';
+    
+    const lines = [];
+    lines.push(chalk.bold('Advanced Plans:\n'));
+    for (const p of plans) {
+      const active = p.id === this.activePlanId ? chalk.green(' (active)') : '';
+      lines.push(`  ${chalk.cyan(p.id)} - ${p.title}${active}`);
+      lines.push(`      Status: ${p.status} | Created: ${p.createdAt?.slice(0, 10) || 'unknown'}`);
+      lines.push(`      Phases: ${p.phases}`);
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  renderPlanFull(planId) {
+    const plan = this.getPlan(planId);
+    if (!plan) return 'Plan not found.';
+    
+    const lines = [];
+    lines.push(chalk.bold(`\n${'='.repeat(50)}`));
+    lines.push(chalk.bold(`Plan: ${plan.title}`));
+    lines.push(chalk.bold('='.repeat(50)));
+    if (plan.description) lines.push(chalk.gray(plan.description));
+    lines.push('');
+    
+    for (const phase of plan.phases) {
+      const phaseDone = phase.tasks.every(t => t.status === 'done');
+      const phaseStatus = phaseDone ? chalk.green('✓') : (phase.status === 'in-progress' ? chalk.yellow('◐') : chalk.gray('○'));
+      lines.push(chalk.bold(`\n${phaseStatus} ${phase.name}`));
+      
+      for (const task of phase.tasks) {
+        const taskDone = task.status === 'done';
+        const taskStatus = taskDone ? chalk.green('✓') : (task.status === 'in-progress' ? chalk.yellow('◐') : (task.status === 'blocked' ? chalk.red('✗') : chalk.gray('○')));
+        lines.push(`     ${taskStatus} ${task.id} ${task.name}${taskDone ? ' ' + chalk.green('done') : ''}`);
+      }
+    }
+    
+    const total = plan.phases.reduce((s, p) => s + p.tasks.length, 0);
+    const done = plan.phases.reduce((s, p) => s + p.tasks.filter(t => t.status === 'done').length, 0);
+    lines.push(chalk.bold(`\nProgress: ${done}/${total} tasks complete`));
+    lines.push('');
+    
+    return lines.join('\n');
   }
 
   _save(id, data) { fs.writeFileSync(path.join(this.planDir, `${id}.json`), JSON.stringify(data, null, 2), 'utf8'); }

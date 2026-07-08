@@ -25,7 +25,8 @@ const SLASH_COMMANDS = [
   { cmd: '/help', desc: 'Show this list of commands' },
   { cmd: '/models', desc: 'List models installed in Ollama' },
   { cmd: '/model <name>', desc: 'Switch the active model for this session' },
-  { cmd: '/plan', desc: 'Show the current plan and task status' },
+  { cmd: '/plan', desc: 'Show the quick task list (flat list)' },
+  { cmd: '/plans', desc: 'Show all advanced plans (phases-based)' },
   { cmd: '/task', desc: 'Manage tasks - see "/task" with no args for usage' },
   { cmd: '/memory', desc: 'Show the active project\'s persistent memory (.devy-agent/memory.md)' },
   { cmd: '/project', desc: 'Show which project directory is currently active' },
@@ -141,6 +142,25 @@ async function handleSlashCommand(text, ctx) {
       printPlan(ctx.planStore.summary());
       return;
 
+    case 'plans':
+      if (ctx.planManager) {
+        const plans = ctx.planManager.listPlans();
+        if (plans.length === 0) {
+          console.log(chalk.gray('\nNo advanced plans found. Use create_advanced_plan to create one.\n'));
+        } else {
+          // If there's an active plan, show it in detail
+          if (ctx.planManager.activePlanId) {
+            console.log(ctx.planManager.renderPlanFull(ctx.planManager.activePlanId));
+          } else {
+            console.log('\n' + ctx.planManager.renderPlansList() + '\n');
+            console.log(chalk.gray('Use /plan <id> to view a specific plan, or the agent will show details when working.'));
+          }
+        }
+      } else {
+        console.log(chalk.gray('\nNo advanced plans found.\n'));
+      }
+      return;
+
     case 'task':
       handleTaskCommand(rest, ctx.planStore);
       return;
@@ -248,7 +268,7 @@ async function main() {
   });
 
   const { tools, container } = buildToolRegistry(config, contextManager, devyPaths, llmClient);
-  const { planStore, memoryStore, chatLog, projectContext, skillRegistry, graphPlanManager } = container.getAll();
+  const { planStore, memoryStore, chatLog, projectContext, skillRegistry, graphPlanManager, planManager } = container.getAll();
   
   // Connect and register MCP servers dynamically
   const mcpClients = await connectAndRegisterMCP(tools, projectContext.dir);
@@ -286,7 +306,7 @@ async function main() {
     approvalManager
   });
 
-  const ctx = { config, llmClient, planStore, memoryStore, projectContext, contextManager, orchestrator, skillRegistry, approvalManager, graphPlanManager };
+  const ctx = { config, llmClient, planStore, memoryStore, projectContext, contextManager, orchestrator, skillRegistry, approvalManager, graphPlanManager, planManager };
 
   printBanner(config);
   logger.info(`Project data folder: ${path.relative(process.cwd(), devyPaths.devyDir) || DEVY_DIR_NAME} (plan, memory, chat log, tool-output cache)`);

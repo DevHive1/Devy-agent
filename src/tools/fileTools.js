@@ -10,6 +10,7 @@ function buildFileTools(projectContext) {
       params: { path: 'string (required)', offset: 'number (optional, first line number)', limit: 'number (optional, number of lines)' },
       handler: async ({ path: p, offset, limit }) => {
         try {
+          if (!p) return { error: 'path is required. Please provide a valid file path.' };
           const full = resolveWithin(projectContext.dir, p);
           if (!fs.existsSync(full)) return { error: `File not found: ${p}` };
           if (fs.statSync(full).isDirectory()) return { error: `${p} is a directory, not a file. Use list_dir instead.` };
@@ -33,7 +34,9 @@ function buildFileTools(projectContext) {
       params: { path: 'string (required)', content: 'string (required)' },
       handler: async ({ path: p, content }) => {
         try {
+          if (!p) return { error: 'path is required. Please provide a valid file path.' };
           const full = resolveWithin(projectContext.dir, p);
+          if (fs.existsSync(full) && fs.statSync(full).isDirectory()) return { error: `${p} is a directory, not a file. Cannot write to a directory.` };
           fs.mkdirSync(path.dirname(full), { recursive: true });
           fs.writeFileSync(full, content ?? '', 'utf8');
           return { success: true, path: p, bytes: Buffer.byteLength(content || '') };
@@ -48,8 +51,10 @@ function buildFileTools(projectContext) {
       params: { path: 'string (required)', old_str: 'string (required)', new_str: 'string (required, empty to delete)' },
       handler: async ({ path: p, old_str, new_str }) => {
         try {
+          if (!p) return { error: 'path is required. Please provide a valid file path.' };
           const full = resolveWithin(projectContext.dir, p);
           if (!fs.existsSync(full)) return { error: `File not found: ${p}` };
+          if (fs.statSync(full).isDirectory()) return { error: `${p} is a directory, not a file. Use list_dir instead.` };
           const content = fs.readFileSync(full, 'utf8');
           const count = content.split(old_str).length - 1;
           if (count === 0) return { error: 'old_str was not found verbatim in the file. Re-read the file to get the exact current text before editing.' };

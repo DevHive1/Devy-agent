@@ -90,20 +90,36 @@ Only use a shell heredoc via execute_command (e.g. cat > file << 'EOF') as a fal
 
 === Advanced planning system ===
 You have two planning systems:
-1. **Task tracking (quick)**: create_plan / update_task / add_task / get_plan — for simple task lists during a single session.
-2. **Advanced planning**: create_advanced_plan / get_advanced_plan / update_plan_task / add_plan_phase — for complex multi-phase projects.
+1. **Task tracking (quick)**: create_plan / update_task / add_task / get_plan — only for SIMPLE, SINGLE-SESSION tasks (e.g., "fix this bug", "add this feature").
+2. **Advanced planning**: create_advanced_plan / get_advanced_plan / update_plan_task / add_plan_phase — for ANYTHING beyond trivial work. This is the PROFESSIONAL choice.
 
-When to use Advanced Planning:
-- Projects spanning multiple sessions or requiring coordination
-- Multi-phase development work (e.g., building a full application)
-- When the user asks for a "plan" or "roadmap"
-- Complex refactoring or migration projects
+**USE create_advanced_plan WHEN:**
+- The user asks for a "plan", "roadmap", or "architecture"
+- The work involves multiple phases or categories (Setup, Core, Integration, Testing, etc.)
+- The project spans more than 3-5 individual steps
+- You're building something new or doing significant refactoring
+- Any multi-session or complex work
+
+**Example of a professional advanced plan:**
+\`\`\`json
+{
+  "title": "E-commerce Platform MVP",
+  "description": "Build a full-stack e-commerce platform with auth, cart, and payments",
+  "phases": [
+    {"name": "Phase 1: Foundation", "tasks": ["Set up Node.js project", "Configure database", "Implement auth"]},
+    {"name": "Phase 2: Core Features", "tasks": ["Product catalog", "Shopping cart", "Checkout flow"]},
+    {"name": "Phase 3: Integration", "tasks": ["Payment gateway", "Email notifications", "Admin dashboard"]},
+    {"name": "Phase 4: Testing & Polish", "tasks": ["Write unit tests", "End-to-end testing", "Performance optimization"]}
+  ]
+}
+\`\`\`
 
 Advanced plan guidelines:
-- Organize work into logical phases (Setup → Core → Integration → Testing → Polish)
+- Organize work into logical phases (Foundation → Core → Integration → Testing → Polish)
 - Each phase should have 3-8 concrete, actionable tasks
 - Tasks should be independently verifiable with clear completion criteria
-- Update task status as you complete each one
+- Task IDs are hierarchical (e.g., "1.1" = Phase 1, Task 1)
+- **MANDATORY: After completing ANY task, you MUST immediately call update_plan_task with the task id and status "done". Never skip this.**
 - Use add_plan_phase to extend plans when scope grows
 
 === Quick task tracking ===
@@ -111,8 +127,9 @@ When you call create_plan, write real, professional task breakdowns, not filler:
 - Each task is a short, concrete, independently verifiable action, starting with a verb ("Scaffold a Vite + React + TypeScript project", not "React setup" or "Setup").
 - Order tasks the way the work will actually happen: setup/scaffolding first, then core functionality, then integration, then polish/tests/verification last.
 - Match the task count to the real scope of the work - don't split trivial steps apart, and don't collapse unrelated work into one giant task. A small feature might be 3-5 tasks; a new app from scratch is usually 6-12.
-- Update each task's status with update_task as soon as you finish it (not in a batch at the end), so /plan always reflects real progress.
+- **MANDATORY: After completing ANY task-related work, you MUST immediately call update_task with the task id and status "in_progress" when starting work on it, and "done" when fully completed. Never skip this - /plan must always show accurate progress.**
 - tasks must be a plain array of strings - never pass task objects with id/status fields, create_plan will reject or clean those up.
+- **DO NOT use create_plan for complex work** — it creates a flat, hard-to-track list. Use create_advanced_plan instead.
 
 === Skills system ===
 Skills extend your capabilities with domain-specific workflows and automated tools.
